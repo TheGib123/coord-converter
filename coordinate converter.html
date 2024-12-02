@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPSG:3857 to EPSG:4326 Converter</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        th {
+            background-color: #f4f4f4;
+            text-align: left;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSV Coordinate Converter</h1>
+    <input type="file" id="csvFileInput" accept=".csv">
+    <button id="downloadButton" style="display:none;">Download Updated CSV</button>
+    <div id="tableContainer"></div>
+    <div id="errorMessages" class="error"></div>
+
+    <script>
+        /**
+         * Converts Web Mercator (EPSG:3857) x, y coordinates to WGS 84 (EPSG:4326) latitude and longitude.
+         * @param {number} x - The x coordinate in EPSG:3857.
+         * @param {number} y - The y coordinate in EPSG:3857.
+         * @returns {Object} - An object containing `lat` (latitude) and `lon` (longitude).
+         */
+        function convertEPSG3857To4326(x, y) {
+            const R_MAJOR = 6378137.0; // Earth's radius in meters (Web Mercator basis)
+            const lon = (x / R_MAJOR) * (180 / Math.PI);
+            const temp = Math.exp(y / R_MAJOR);
+            const lat = (Math.atan(temp) - Math.PI / 4) * 2 * (180 / Math.PI);
+            return { lat, lon };
+        }
+
+        let updatedRows = [];
+        let errorMessages = [];
+
+        // Handle file upload
+        document.getElementById("csvFileInput").addEventListener("change", function(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                alert("Please upload a file.");
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                const rows = content.split("\n").map(row => row.split(",").map(cell => cell.trim())); // Trim each cell
+
+                if (rows.length < 2) {
+                    alert("Invalid CSV format.");
+                    return;
+                }
+
+                // Extract headers and trim them
+                const headers = rows[0];
+                const gisxIndex = headers.indexOf("gisx");
+                const gisyIndex = headers.indexOf("gisy");
+
+                if (gisxIndex === -1 || gisyIndex === -1) {
+                    alert("CSV file must contain 'gisx' and 'gisy' columns.");
+                    return;
+                }
+
+                // Add new columns for lat and lon
+                headers.push("lat", "lon");
+
+                // Clear previous error messages
+                errorMessages = [];
+                updatedRows = [headers]; // Initialize updated rows with headers
+
+                // Process rows and handle errors
+                rows.slice(1).forEach((row, index) => {
+                    const gisx = parseFloat(row[gisxIndex]);
+                    const gisy = parseFloat(row[gisyIndex]);
+
+                    if (isNaN(gisx) || isNaN(gisy)) {
+                        errorMessages.push(`Row ${index + 2} has invalid 'gisx' or 'gisy' values: ${row[gisxIndex]}, ${row[gisyIndex]}`);
+                        updatedRows.push([...row, "Invalid", "Invalid"]); // Add row with error status
+                    } else {
+                        const { lat, lon } = convertEPSG3857To4326(gisx, gisy);
+                        row.push(lat.toFixed(6), lon.toFixed(6));
+                        updatedRows.push(row);
+                    }
+                });
+
+                // Display the updated table
+                displayTable(updatedRows);
+                displayErrorMessages(errorMessages);
+
+                // Show download button
+                document.getElementById("downloadButton").style.display = "block";
+            };
+            reader.readAsText(file);
+        });
+
+        // Display the data in a table
+        function displayTable(rows) {
+            const container = document.getElementById("tableContainer");
+            container.innerHTML = ""; // Clear existing table
+            const table = document.createElement("table");
+
+            rows.forEach((row, index) => {
+                const tr = document.createElement("tr");
+                row.forEach(cell => {
+                    const cellElement = index === 0 ? document.createElement("th") : document.createElement("td");
+                    cellElement.textContent = cell.trim();
+                    tr.appendChild(cellElement);
+                });
+                table.appendChild(tr);
+            });
+
+            container.appendChild(table);
+        }
+
+        // Display error messages
+        function displayErrorMessages(errors) {
+            const errorContainer = document.getElementById("errorMessages");
+            if (errors.length > 0) {
+                errorContainer.innerHTML = `<p><strong>Errors:</strong></p><ul>${errors.map(error => `<li>${error}</li>`).join('')}</ul>`;
+            } else {
+                errorContainer.innerHTML = '';
+            }
+        }
+
+        // Function to download CSV file
+        function downloadCSV() {
+            const csvContent = rowsToCSV(updatedRows);
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'updated_coordinates.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Convert rows to CSV format
+        function rowsToCSV(rows) {
+            return rows.map(row => row.join(",")).join("\n");
+        }
+
+        // Download button click event
+        document.getElementById("downloadButton").addEventListener("click", downloadCSV);
+    </script>
+</body>
+</html>
